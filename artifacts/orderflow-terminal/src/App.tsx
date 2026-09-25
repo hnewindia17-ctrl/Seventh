@@ -52,7 +52,20 @@ function VolumeScreener({ symbols, selected, onSelect }: { symbols: SymbolInfo[]
     return next.sort((a, b) => b.volume - a.volume).slice(0, 8);
   }, [sort, symbols]);
 
-  return <section className={`screener ${open ? 'is-open' : ''}`}><div className="screener-bar"><div className="screener-title"><ArrowDownUp size={13} /><span>MARKET SCREENER</span><small>{symbols.length || '—'} perpetuals tracked</small></div><div className="screener-tabs">{(['volume', 'spike', 'gainers', 'losers', 'pressure'] as ScreenSort[]).map((item) => <button key={item} className={sort === item ? 'active' : ''} onClick={() => { setSort(item); setOpen(true); }}>{item === 'volume' ? 'VOLUME' : item === 'spike' ? 'SPIKE' : item === 'gainers' ? 'GAINERS' : item === 'losers' ? 'LOSERS' : 'PRESSURE'}</button>)}</div><button className="screener-toggle" onClick={() => setOpen((value) => !value)}>{open ? 'CLOSE' : 'OPEN'} <ChevronDown size={12} className={open ? 'rotated' : ''} /></button></div>{open && <div className="screener-grid">{ranked.map((item, index) => <button key={item.symbol} className={`screener-row ${selected === item.symbol ? 'selected' : ''}`} onClick={() => onSelect(item.symbol)}><span className="screener-rank">{String(index + 1).padStart(2, '0')}</span><strong>{item.baseAsset}</strong><span className="screener-symbol">/USDT</span><span className="screener-price">{fmt(item.lastPrice, item.lastPrice > 1000 ? 2 : 4)}</span><span className={`screener-change ${item.change >= 0 ? 'green' : 'red'}`}>{sort === 'spike' ? `${item.volumeSpike.toFixed(1)}×` : `${item.change >= 0 ? '+' : ''}${item.change.toFixed(2)}%`}</span><span className="screener-volume">{compact(item.volume)}</span>{item.change >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}</button>)}</div>}</section>;
+  const sortLabel = sort === 'volume' ? 'HIGH VOLUME' : sort === 'spike' ? 'VOLUME SPIKE' : sort === 'gainers' ? 'TOP GAINERS' : sort === 'losers' ? 'TOP LOSERS' : 'PRESSURE';
+  return <section className={`screener ${open ? 'is-open' : ''}`} aria-label="Market coin screener">
+    <div className="screener-bar">
+      <div className="screener-title"><ArrowDownUp size={13} /><span>MARKET SCREENER</span><small>{symbols.length || '—'} perpetuals tracked</small></div>
+      <div className="screener-tabs">
+        {(['volume', 'spike', 'gainers', 'losers', 'pressure'] as ScreenSort[]).map((item) => <button key={item} className={sort === item ? 'active' : ''} onClick={() => { setSort(item); setOpen(true); }} data-testid={`button-screener-${item}`}>{item === 'volume' ? 'HIGH VOLUME' : item === 'spike' ? 'SPIKE' : item === 'gainers' ? 'TOP GAINERS' : item === 'losers' ? 'TOP LOSERS' : 'PRESSURE'}</button>)}
+      </div>
+      <button className="screener-toggle" onClick={() => setOpen((value) => !value)}>{open ? 'CLOSE' : 'OPEN'} <ChevronDown size={12} className={open ? 'rotated' : ''} /></button>
+    </div>
+    {open && <div className="screener-grid" data-testid="market-screener-results">
+      <div className="screener-selection-label">{sortLabel} · click a coin to load its live order-flow terminal</div>
+      {ranked.map((item, index) => <button key={item.symbol} className={`screener-row ${selected === item.symbol ? 'selected' : ''}`} onClick={() => onSelect(item.symbol)} data-testid={`button-screener-coin-${item.symbol}`}><span className="screener-rank">{String(index + 1).padStart(2, '0')}</span><strong>{item.baseAsset}</strong><span className="screener-symbol">/{item.quoteAsset}</span><span className="screener-price">{fmt(item.lastPrice, item.lastPrice > 1000 ? 2 : 4)}</span><span className={`screener-change ${item.change >= 0 ? 'green' : 'red'}`}>{sort === 'spike' ? `${item.volumeSpike.toFixed(1)}×` : `${item.change >= 0 ? '+' : ''}${item.change.toFixed(2)}%`}</span><span className="screener-volume">{compact(item.volume)}</span>{item.change >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}</button>)}
+    </div>}
+  </section>;
 }
 
 function TopBar({ symbol, setSymbol, interval, setInterval, favorites, onFavorite, symbols, contractType, setContractType, status, onReconnect, paused, onPause, compactMode, onCompact, secondaryOpen, onSecondary }: { symbol: string; setSymbol: (value: string) => void; interval: string; setInterval: (value: string) => void; favorites: string[]; onFavorite: (value: string) => void; symbols: ReturnType<typeof usePerpetualSymbols>['symbols']; contractType: ContractType; setContractType: (value: ContractType) => void; status: MarketStatus; onReconnect: () => void; paused: boolean; onPause: () => void; compactMode: boolean; onCompact: () => void; secondaryOpen: boolean; onSecondary: () => void }) {
@@ -591,6 +604,7 @@ function AppShell() {
   return <main className={`${compactMode ? 'terminal compact' : 'terminal'}${chartFullscreen ? ' chart-fullscreen' : ''}${secondaryOpen ? ' secondary-open' : ''}`}>
      <TopBar {...{ symbol, setSymbol: selectSymbol, interval, setInterval: changeInterval, favorites, onFavorite: toggleFavorite, symbols, contractType, setContractType: changeContract, status, onReconnect: reconnect, paused, onPause: () => setPaused((value) => !value), compactMode, onCompact: () => setCompactMode((value) => !value), secondaryOpen, onSecondary: () => setSecondaryOpen((value) => !value) }} />
     <div className="workspace">
+      <div className="screener-surface"><VolumeScreener symbols={symbols} selected={symbol} onSelect={selectSymbol} /></div>
       <div className="terminal-body">
         <div className="main-grid">
           <div className="left-column flow-panel-stack">
@@ -637,7 +651,6 @@ function AppShell() {
       <div className="secondary-surfaces">
         <div className="secondary-rail-wrap"><ModuleRail /></div>
         <Overview {...{ symbol, price, change, quoteVolume, bids, asks, candles, status, onReconnect: reconnect }} />
-        <VolumeScreener symbols={symbols} selected={symbol} onSelect={selectSymbol} />
         <MarketPulseBar {...pulse} imbalance={imbalance} />
         <DivergenceBanner divergence={currentPressureDivergence} />
       </div>
