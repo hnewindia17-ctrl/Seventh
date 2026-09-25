@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Orderflow Terminal"
+description = "A responsive crypto order-flow chart for tracking price action, liquidity, and market microstructure indicators with precise visual controls."
+version = "1.0.0"
+id = "artifacts/orderflow-terminal"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24981
+
+[services.development]
+run = "pnpm --filter @workspace/orderflow-terminal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/orderflow-terminal", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/orderflow-terminal/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24981"
+BASE_PATH = "/"

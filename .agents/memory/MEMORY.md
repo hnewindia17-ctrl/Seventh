@@ -1,0 +1,1 @@
+- [Strict trade alerts](strict-trade-alerts.md) — alert modals require unanimous indicator confluence; partial matches remain suppressed.

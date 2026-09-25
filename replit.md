@@ -1,6 +1,6 @@
-# [Project name]
+# Orderflow Terminal
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Live Binance Futures order-flow terminal for tracking price action, liquidity, execution pressure, and strict multi-indicator trade alerts.
 
 ## Run & Operate
 
@@ -22,15 +22,23 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/orderflow-terminal/src/App.tsx` — terminal shell, pair/timeframe selector, chart modules, and live market wiring.
+- `artifacts/orderflow-terminal/src/hooks/use-binance-market.ts` — public Binance Futures REST and WebSocket market data.
+- `artifacts/orderflow-terminal/src/utils/orderflow.ts` — pressure, divergence, liquidity, and absorption analysis.
+- `artifacts/orderflow-terminal/src/utils/trade-alert-engine.ts` — strict all-gates trade-alert evaluator.
+- `artifacts/orderflow-terminal/src/components/trade-alert-modal.tsx` — alert readiness monitor and animated modal.
+- `artifacts/orderflow-terminal/src/index.css` — terminal theme and alert animations.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Trade alerts are evaluated client-side from the same live public market streams already powering the terminal; no private account or execution API is used.
+- A signal is emitted only when every required gate passes for the current selected pair and timeframe. Partial confluence is rendered as scanning, never as an alert.
+- The execute button stages the alert price into the existing risk calculator and explicitly reports that live execution is not connected.
+- The selected pair is resolved from the live Binance perpetual-symbol list instead of using a fixed asset in the alert system.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The terminal shows live candlesticks, cumulative price pressure, candle-direction balance, DOM/liquidity heatmaps, trade tape, absorption zones, iceberg radar, and a strict animated buy/sell alert modal.
 
 ## User preferences
 
@@ -38,7 +46,8 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Public Binance streams can be delayed or disconnect; the UI reports feed state and alerts remain blocked until the required live data window is available.
+- The alert system intentionally has a high bar and may remain in scanning mode for long periods.
 
 ## Pointers
 
