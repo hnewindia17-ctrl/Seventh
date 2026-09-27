@@ -4,11 +4,12 @@ import { Activity, ArrowDownUp, BarChart3, BookOpen, ChevronDown, CircleHelp, Cr
 import AbsorptionVisualizer from '@/components/absorption-visualizer';
 import DomVisualizer from '@/components/dom-visualizer';
 import { IcebergRadar } from '@/components/iceberg-radar';
-import { TradeAlertModal, TradeAlertMonitor } from '@/components/trade-alert-modal';
+import { DivergenceWatchPanel, TradeAlertModal, TradeAlertMonitor } from '@/components/trade-alert-modal';
 import type { IcebergAlert } from '@/hooks/use-iceberg-engine';
 import { useBinanceMarket, useMarketPulse, usePerpetualSymbols, type Candle, type ContractType, type DepthLevel, type Liquidation, type MarketStatus, type SymbolInfo, type Trade } from '@/hooks/use-binance-market';
 import { analyzeAbsorption, buildSwingLiquidity, buildVolumeProfile, buildVwapBands, detectCurrentPressureDivergence, detectDivergences, detectFlowEvents, stackedImbalance, type AbsorptionZone, type Divergence, type FlowEvent, type PressureDivergenceSnapshot, type SwingLiquidity } from '@/utils/orderflow';
 import { evaluateTradeAlert, type TradeAlertEvaluation } from '@/utils/trade-alert-engine';
+import { detectDivergenceAlerts, type DivergenceAlert } from '@/utils/divergence-alert-engine';
 
 const timeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1D', '1W', '1M'];
 const fmt = (value: number | null | undefined, digits = 2) => value == null || !Number.isFinite(value) ? '—' : value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -506,6 +507,7 @@ function AppShell() {
   const [indicatorVisibility, setIndicatorVisibility] = useState<IndicatorVisibility>(defaultIndicatorVisibility);
   const [tradeAlert, setTradeAlert] = useState<ReturnType<typeof evaluateTradeAlert>['alert']>(null);
   const [alertActionStatus, setAlertActionStatus] = useState<string | null>(null);
+  const [dismissedDivergenceKeys, setDismissedDivergenceKeys] = useState<string[]>([]);
   const lastAlertKeyRef = useRef<string | null>(null);
   const { symbols } = usePerpetualSymbols(contractType);
   const { candles, bids, asks, trades, liquidations, price, change, quoteVolume, status, reconnect } = useBinanceMarket(symbol, interval, paused, contractType);
@@ -535,6 +537,8 @@ function AppShell() {
       absorptionZones: indicatorVisibility.absorptionZones,
     },
   }), [absorptionAnalysis, asks, bids, candles, icebergAlerts, imbalance, indicatorVisibility.absorptionZones, indicatorVisibility.icebergOrders, indicatorVisibility.institutionalFlow, indicatorVisibility.liquidityWalls, interval, price, symbol, trades]);
+  const divergenceAlerts = useMemo(() => detectDivergenceAlerts(symbol, interval, candles, trades), [candles, interval, symbol, trades]);
+  const visibleDivergenceAlerts = useMemo(() => divergenceAlerts.filter((alert) => !dismissedDivergenceKeys.includes(alert.key)), [divergenceAlerts, dismissedDivergenceKeys]);
   const effectiveEnd = windowEnd === 0 ? candles.length : Math.min(candles.length, Math.max(visibleCount, windowEnd));
   const effectiveStart = Math.max(0, effectiveEnd - visibleCount);
   useEffect(() => {
@@ -555,6 +559,7 @@ function AppShell() {
     setTradeAlert(null);
     setAlertActionStatus(null);
     lastAlertKeyRef.current = null;
+    setDismissedDivergenceKeys([]);
   }, [interval, symbol]);
   const toggleFavorite = (value: string) => setFavorites((items) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value]);
   const changeInterval = (value: string) => { setHoveredTime(null); setWindowEnd(0); setInterval(value); };
@@ -600,6 +605,7 @@ function AppShell() {
     setTradeAlert(null);
     setAlertActionStatus('Alert dismissed — waiting for a new complete confluence event.');
   };
+  const dismissDivergenceAlert = (key: string) => setDismissedDivergenceKeys((current) => [...current.filter((item) => item !== key), key].slice(-32));
 
   return <main className={`${compactMode ? 'terminal compact' : 'terminal'}${chartFullscreen ? ' chart-fullscreen' : ''}${secondaryOpen ? ' secondary-open' : ''}`}>
      <TopBar {...{ symbol, setSymbol: selectSymbol, interval, setInterval: changeInterval, favorites, onFavorite: toggleFavorite, symbols, contractType, setContractType: changeContract, status, onReconnect: reconnect, paused, onPause: () => setPaused((value) => !value), compactMode, onCompact: () => setCompactMode((value) => !value), secondaryOpen, onSecondary: () => setSecondaryOpen((value) => !value) }} />
@@ -610,6 +616,7 @@ function AppShell() {
           <div className="left-column flow-panel-stack">
              <IndicatorControlPanel visibility={indicatorVisibility} onChange={toggleIndicator} />
             <TradeAlertMonitor evaluation={tradeAlertEvaluation} symbol={symbol} timeframe={interval} actionStatus={alertActionStatus} />
+            <DivergenceWatchPanel alerts={visibleDivergenceAlerts} onDismiss={dismissDivergenceAlert} />
             <ChartNavigation candles={candles} visibleCount={visibleCount} onVisibleCount={(value) => { setVisibleCount(value); setWindowEnd(0); }} windowEnd={effectiveEnd} onWindowEnd={setWindowEnd} />
             <Panel id="price-action" title="COIN PRICE CHART" hint="Live OHLC price action with volume profile, point of control and visible orderbook liquidity walls.">
                <div className="flow-module-head"><span className="instrument-label">{symbol} <small>· {interval}</small></span><span className="chart-inline-meta"><span className="legend-green" /> BULL <span className="legend-red" /> BEAR</span><span className="live-tag"><i /> LIVE</span><button className="chart-fullscreen-button" onClick={() => setChartFullscreen((value) => !value)} title={chartFullscreen ? 'Restore terminal layout' : 'Expand chart'} data-testid={chartFullscreen ? 'button-chart-restore' : 'button-chart-fullscreen'}>{chartFullscreen ? <Minimize2 size={13} /> : <Expand size={13} />}{chartFullscreen ? 'RESTORE' : 'FULLSCREEN'}</button></div>
