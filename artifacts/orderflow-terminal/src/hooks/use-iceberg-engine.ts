@@ -41,6 +41,9 @@ interface BinancePayload {
   q?: string;
   m?: boolean;
   T?: number;
+  U?: number;
+  u?: number;
+  pu?: number;
   b?: [string, string][];
   a?: [string, string][];
 }
@@ -53,6 +56,12 @@ const HISTORY_KEY_PREFIX = 'orderflow-iceberg-history-v1:';
 
 function normalizeSymbol(symbol: string) {
   return symbol.toLowerCase().replace(/[^a-z0-9]/g, '') || 'btcusdt';
+}
+
+function priceKey(value: string | number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return String(value);
+  return numeric.toFixed(12).replace(/\.?0+$/, '');
 }
 
 function isIcebergAlert(value: unknown): value is IcebergAlert {
@@ -125,6 +134,7 @@ export function useIcebergEngine(
   const [historyStorageAvailable, setHistoryStorageAvailable] = useState(() => canUseHistoryStorage());
   const [latestAlert, setLatestAlert] = useState<IcebergAlert | null>(null);
   const [connection, setConnection] = useState<RadarConnection>('connecting');
+  const [depthReady, setDepthReady] = useState(false);
   const [lastEventAt, setLastEventAt] = useState<number>(Date.now());
   const settingsRef = useRef(settings);
   const historyRef = useRef(history);
@@ -140,6 +150,10 @@ export function useIcebergEngine(
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let disposed = false;
     let reconnectAttempt = 0;
+    let depthSynced = false;
+    let depthBuffer: BinancePayload[] = [];
+    let depthSyncGeneration = 0;
+    const abortController = new AbortController();
 
     const normalizedSymbol = normalizeSymbol(symbol);
     setAlerts([]);
@@ -148,6 +162,8 @@ export function useIcebergEngine(
     setHistory(restoredHistory);
     setHistoryStorageAvailable(canUseHistoryStorage());
     setLatestAlert(null);
+    setDepthReady(false);
+    depthRef.current = { bids: new Map(), asks: new Map() };
 
     const publish = (nextAlert: IcebergAlert, persist = true) => {
       setLatestAlert(nextAlert);
@@ -173,6 +189,7 @@ export function useIcebergEngine(
       visibleQty: number,
       timestamp: number,
     ) => {
+      if (!depthSynced) return;
       const settingsNow = settingsRef.current;
       const baseline = Math.max(visibleQty, 0.01);
       const executedNotional = executedQty * price;
@@ -207,7 +224,7 @@ export function useIcebergEngine(
       if (!Number.isFinite(price) || !Number.isFinite(quantity) || quantity <= 0) return;
       const direction: IcebergDirection = payload.m ? 'sell' : 'buy';
       const timestamp = Number(payload.T) || Date.now();
-      const key = price.toFixed(2);
+      const key = priceKey(price);
       const prints = printsRef.current.get(key) ?? [];
       prints.push({ quantity, timestamp });
       const cutoff = timestamp - WINDOW_MS;
@@ -224,10 +241,10 @@ export function useIcebergEngine(
       setLastEventAt(timestamp);
     };
 
-    const processDepth = (payload: { b?: [string, string][]; a?: [string, string][] }) => {
+    const applyDepth = (payload: { b?: [string, string][]; a?: [string, string][] }) => {
       const update = (entries: [string, string][] | undefined, map: Map<string, number>) => {
         entries?.forEach(([rawPrice, rawQuantity]) => {
-          const key = Number(rawPrice).toFixed(2);
+          const key = priceKey(rawPrice);
           const quantity = Number(rawQuantity);
           if (quantity === 0) map.delete(key);
           else if (Number.isFinite(quantity)) map.set(key, quantity);
@@ -237,6 +254,43 @@ export function useIcebergEngine(
       update(payload.b, depthRef.current.bids);
       update(payload.a, depthRef.current.asks);
       setLastEventAt(Date.now());
+    };
+
+    const processDepth = (payload: BinancePayload) => {
+      if (!depthSynced) {
+        depthBuffer = [...depthBuffer.slice(-4999), payload];
+        return;
+      }
+      applyDepth(payload);
+    };
+
+    const syncDepth = async () => {
+      const generation = ++depthSyncGeneration;
+      depthSynced = false;
+      depthBuffer = [];
+      setDepthReady(false);
+      try {
+        const depthEndpoint = contractType === 'coin-m'
+          ? 'https://dapi.binance.com/dapi/v1/depth'
+          : 'https://fapi.binance.com/fapi/v1/depth';
+        const response = await fetch(`${depthEndpoint}?symbol=${normalizedSymbol.toUpperCase()}&limit=1000`, { signal: abortController.signal });
+        if (!response.ok) throw new Error(`Depth snapshot failed: ${response.status}`);
+        const snapshot = await response.json() as { lastUpdateId?: number; bids?: [string, string][]; asks?: [string, string][] };
+        if (disposed || generation !== depthSyncGeneration) return;
+        depthRef.current = { bids: new Map(), asks: new Map() };
+        applyDepth({ b: snapshot.bids, a: snapshot.asks });
+        const snapshotId = Number(snapshot.lastUpdateId) || 0;
+        depthBuffer
+          .filter((update) => update.u == null || Number(update.u) > snapshotId)
+          .forEach((update) => applyDepth(update));
+        depthBuffer = [];
+        depthSynced = true;
+        setDepthReady(true);
+      } catch {
+        if (!disposed && generation === depthSyncGeneration) {
+          setDepthReady(false);
+        }
+      }
     };
 
     const connect = () => {
@@ -252,6 +306,7 @@ export function useIcebergEngine(
         reconnectAttempt = 0;
         setConnection('live');
         setLastEventAt(Date.now());
+        void syncDepth();
       };
       socket.onmessage = (event) => {
         try {
@@ -268,6 +323,10 @@ export function useIcebergEngine(
       };
       socket.onclose = () => {
         if (disposed) return;
+        depthSyncGeneration += 1;
+        depthSynced = false;
+        depthBuffer = [];
+        setDepthReady(false);
         setConnection('offline');
         reconnectAttempt += 1;
         reconnectTimer = setTimeout(connect, Math.min(15000, 1200 * 2 ** Math.min(reconnectAttempt, 4)));
@@ -277,6 +336,8 @@ export function useIcebergEngine(
     connect();
     return () => {
       disposed = true;
+      depthSyncGeneration += 1;
+      abortController.abort();
       if (socket) socket.close();
       if (reconnectTimer) clearTimeout(reconnectTimer);
     };
@@ -293,6 +354,7 @@ export function useIcebergEngine(
     historyStorageAvailable,
     latestAlert,
     connection,
+    depthReady,
     lastEventAt,
     alertCount: visibleAlerts.length,
     historyCount: history.length,

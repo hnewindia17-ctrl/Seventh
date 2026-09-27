@@ -33,6 +33,7 @@ interface IcebergRadarProps {
   contractType?: ContractType;
   onSymbolChange: (symbol: string) => void;
   onAlert?: (alert: IcebergAlert) => void;
+  onHistory?: (alerts: IcebergAlert[]) => void;
 }
 
 const numberFormat = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
@@ -208,7 +209,7 @@ function AlertRow({ alert, index }: { alert: IcebergAlert; index: number }) {
   );
 }
 
-export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbolChange, onAlert }: IcebergRadarProps) {
+export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbolChange, onAlert, onHistory }: IcebergRadarProps) {
   const [multiplier, setMultiplier] = useState(3);
   const [minNotional, setMinNotional] = useState(0);
   const [side, setSide] = useState<IcebergSideFilter>('all');
@@ -224,7 +225,7 @@ export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbo
   const [expanded, setExpanded] = useState(true);
   const [symbolMenuOpen, setSymbolMenuOpen] = useState(false);
   const [symbolQuery, setSymbolQuery] = useState('');
-  const { alerts, history, latestAlert, connection, lastEventAt, alertCount, historyCount, historyStorageAvailable } = useIcebergEngine(symbol, { multiplier, minNotional, side, visualAlerts }, contractType);
+  const { alerts, history, latestAlert, connection, depthReady, lastEventAt, alertCount, historyCount, historyStorageAvailable } = useIcebergEngine(symbol, { multiplier, minNotional, side, visualAlerts }, contractType);
   const filteredHistory = useMemo(() => history.filter((alert) => {
     if (side !== 'all' && alert.direction !== side) return false;
     return alert.executedNotional >= minNotional;
@@ -235,6 +236,12 @@ export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbo
   useEffect(() => {
     if (latestAlert) onAlertRef.current?.(latestAlert);
   }, [latestAlert]);
+
+  const onHistoryRef = useRef(onHistory);
+  onHistoryRef.current = onHistory;
+  useEffect(() => {
+    if (history.length) onHistoryRef.current?.(history);
+  }, [history]);
 
   useEffect(() => {
     setHistoryLimit(50);
@@ -340,11 +347,11 @@ export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbo
   };
 
   const connectionCopy = connection === 'live'
-    ? 'BINANCE LIVE'
+    ? depthReady ? 'BINANCE LIVE · DEPTH READY' : 'BINANCE LIVE · SYNCING DEPTH'
     : connection === 'connecting'
       ? 'CONNECTING'
       : 'STREAM OFFLINE';
-  const connectionTone = connection === 'live' ? 'text-emerald-300' : connection === 'connecting' ? 'text-amber-300' : 'text-muted-foreground';
+  const connectionTone = connection === 'live' && depthReady ? 'text-emerald-300' : connection === 'connecting' || (connection === 'live' && !depthReady) ? 'text-amber-300' : 'text-muted-foreground';
 
   return (
     <section id="iceberg-radar" className="overflow-hidden rounded-2xl border border-border bg-card/75 shadow-[0_18px_60px_hsl(224_40%_4%/.28)]" data-testid="section-iceberg-radar">
@@ -447,6 +454,12 @@ export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbo
               <span>Browser alerts only work while this page is running; phone sleep/lock is not guaranteed.</span>
             </div>
           )}
+          {historyCount > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-cyan-300/20 bg-cyan-300/[.04] px-3 py-2 text-[10px] text-cyan-100/80" role="status" data-testid="status-iceberg-history-restored">
+              <span><strong className="font-semibold text-cyan-200">RECOVERED ICEBERG HISTORY:</strong> {historyCount} saved event{historyCount === 1 ? '' : 's'} restored for {symbol.toUpperCase()}.</span>
+              <span>Historical markers are restored on matching loaded candles.</span>
+            </div>
+          )}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
             <DepthHeatmap alerts={alerts} visualAlerts={visualAlerts} />
@@ -470,7 +483,7 @@ export function IcebergRadar({ symbol, symbols, contractType = 'usdt-m', onSymbo
               </div>
               <div className={`flex items-start gap-2.5 rounded-xl border p-3 text-[11px] leading-relaxed ${connection === 'offline' ? 'border-rose-300/25 bg-rose-300/[.04] text-rose-100/80' : 'border-primary/20 bg-primary/[.05] text-muted-foreground'}`}>
                 {connection === 'offline' ? <RefreshCcw className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-300" /> : <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />}
-                <span>{connection === 'offline' ? 'Binance iceberg stream is offline. No synthetic alerts are shown; reconnect the market stream to resume detection.' : 'Depth and aggregate trade streams are bounded to an 8 second rolling window.'}</span>
+                <span>{connection === 'offline' ? 'Binance iceberg stream is offline. No synthetic alerts are shown; reconnect the market stream to resume detection.' : depthReady ? 'Depth snapshot is synchronized with aggregate trades. Iceberg detection is active on the rolling 8 second window.' : 'Live stream connected; synchronizing the depth snapshot before iceberg detection starts.'}</span>
               </div>
             </div>
           </div>

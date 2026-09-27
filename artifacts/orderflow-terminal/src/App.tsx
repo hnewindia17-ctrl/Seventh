@@ -563,11 +563,12 @@ function AppShell() {
   }, [interval, symbol]);
   const toggleFavorite = (value: string) => setFavorites((items) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value]);
   const changeInterval = (value: string) => { setHoveredTime(null); setWindowEnd(0); setInterval(value); };
-  const selectSymbol = (value: string) => { setHoveredTime(null); setWindowEnd(0); setSymbol(value); };
+  const selectSymbol = (value: string) => { setHoveredTime(null); setWindowEnd(0); setIcebergAlerts([]); setSymbol(value); };
   const changeContract = (value: ContractType) => {
     setContractType(value);
     setHoveredTime(null);
     setWindowEnd(0);
+    setIcebergAlerts([]);
     setTradeAlert(null);
     setSymbol('');
   };
@@ -633,7 +634,17 @@ function AppShell() {
              <FlowDetailCard candles={candles} hoveredTime={hoveredTime} />
               <AbsorptionVisualizer candles={candles} trades={trades} depth={[...bids, ...asks]} price={price} />
               <DomVisualizer bids={bids} asks={asks} price={price} symbol={symbol} />
-               <IcebergRadar symbols={symbols} symbol={symbol.toLowerCase()} onSymbolChange={(value) => selectSymbol(value.toUpperCase())} onAlert={(alert) => setIcebergAlerts((current) => [alert, ...current.filter((item) => item.id !== alert.id)].slice(0, 80))} />
+                <IcebergRadar
+                  symbols={symbols}
+                  symbol={symbol.toLowerCase()}
+                  onSymbolChange={(value) => selectSymbol(value.toUpperCase())}
+                  onAlert={(alert) => setIcebergAlerts((current) => [alert, ...current.filter((item) => item.id !== alert.id)].slice(0, 80))}
+                  onHistory={(history) => setIcebergAlerts((current) => {
+                    const merged = new Map<string, IcebergAlert>();
+                    [...history, ...current].forEach((alert) => merged.set(alert.id, alert));
+                    return [...merged.values()].sort((a, b) => b.timestamp - a.timestamp).slice(0, 80);
+                  })}
+                />
             <Panel id="flow-direction" title="CUMULATIVE CANDLE-DIRECTION BALANCE" hint="The running direction of sub-bar aggression. Green means buyers are attacking the current market; red means sellers are attacking.">
               <div className="flow-module-head"><span className="instrument-label">{symbol} <small>· {interval}</small></span><span className="live-tag"><i /> LIVE</span></div>
               <div className="flow-module-subtitle">One candle = selected bar · direction balance shows who is currently attacking</div>
